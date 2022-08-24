@@ -1,0 +1,112 @@
+Neo4j-Cypher queries for a Twitter-like graph database.
+
+Query for a Tweet written by a Relevant User (previously defined), containing an specific text and location returning userName and total count
+
+MATCH (r:RelevantTwitterUser)-[:HAS_WRITEN] -> (t:Tweet) 
+WHERE t.text CONTAINS ' PC '  AND r.location= 'Madrid' 
+RETURN r.userName, COUNT (*) as n 
+ORDER by n  DESC
+
+
+Query to find the tweet with most retweets, showing 12 characters:
+
+MATCH (r:Retweet)-[:IS_A_RETWEET_OF] -> (t:Tweet) 
+WITH t, count(r) AS rt 
+RETURN max(rt) AS maxrt, left(t.text,12) 
+ORDER BY maxrt DESC limit 1
+
+
+Finding Geolocated tweets written from Barcelona, which are replies:
+MATCH(t:Tweet)<-[IS_A_REPLY_OF]-(g:GeoLocatedTweet)-[:IS_WRITEN_FROM]->(l:Location) 
+WHERE l.name =~ "(?i)barcelona"
+RETURN Count (g)
+
+
+First and second level followers of relevant users living in Barcelona (show only 5 relevant users):
+MATCH (:TwitterUser)-[:FOLLOWS]->(:TwitterUser)-[:FOLLOWS]->(r:RelevantTwitterUser)
+WITH r, count(*) AS numFollowers2nLevel
+WHERE  r.location =~ "(?i)barcelona"
+RETURN r.userName, numFollowers2nLevel
+ORDER BY numFollowers2nLevel DESC LIMIT 5;
+
+---------------------------------------------------
+Queries for the creation of a running competition database.
+
+We load a new file to set the "speciality" node with different attributes:
+
+LOAD CSV WITH HEADERS FROM "file:///speciality.csv" AS row
+CREATE (n:speciality)
+SET n = row,
+n.speciality_id = toString(row.speciality_id),
+n.name = toString(row.name),
+n.description = toString(row.description);
+
+
+Creation of the node called "Competition":
+
+LOAD CSV WITH HEADERS FROM "file:///competition.csv" AS row
+CREATE (n:competition)
+SET n = row,
+n.competition_id = toInteger(row.competition_id),
+n.speciality_id = toString(row.speciality_id),
+n.name = toString(row.name),
+n.init_date = toString(row.init_date);
+
+
+Creation of the node "runner":
+
+LOAD CSV WITH HEADERS FROM "file:///runner.csv" AS row
+CREATE (n:runner)
+SET n = row,
+n.runner_id = toString(row.runner_id),
+n.first_name = toString(row.first_name),
+n.last_name = toString(row.last_name);
+
+
+Index creation for the available nodes:
+
+CREATE INDEX ON :speciality(speciality_id);
+CREATE INDEX ON :runner(runner_id);
+CREATE INDEX ON :competition(competition_id);
+CREATE INDEX ON :PARTICIPATES(runner_id);
+CREATE INDEX ON :PARTICIPATES(competition_id);
+
+Creation of relationships between nodes:
+MATCH (s:speciality),(c:competition)
+WHERE s.speciality_id = c.speciality_id
+CREATE (c)-[:IS_INCLUDED_IN]->(s);
+
+Creation of a relationship using a load file:
+LOAD CSV WITH HEADERS FROM "file:///participates.csv" AS row 
+MATCH (r:runner),(c:competition) 
+WHERE r.runner_id = toString(row.runner_id)
+AND c.competition_id= toInteger(row.competition_id)
+CREATE (r)-[details:PARTICIPATES]->(c) 
+SET details = row, details.dedicated_time = toString(row.dedicated_time)
+
+Removal of artificial primary keys:
+
+MATCH (n:speciality) REMOVE n.speciality_id
+MATCH (n:competition) REMOVE n.competition_id
+
+Removal of indexes:
+
+DROP INDEX ON :competition(competition_id)
+DROP INDEX ON :competition(competition_id)
+
+Create a new relationship to make faster queries of pairs of runners participating in the same competition:
+
+MATCH (r1:runner)-[]->(c:competition)<-[]-(r2:runner)
+WHERE  r1.runner_id <> r2.runner_id
+WITH r1 AS runner1, r2 AS runner2,
+COUNT(*) AS Number_of_times
+CREATE UNIQUE (runner1)-[:HAS_PARTICIPATED_WITH{times:Number_of_times}]-(runner2)
+
+
+Query of pairs of runners that have participated in the same competition more than 3 times:
+MATCH (r1:runner)-[h:HAS_PARTICIPATED_WITH]->(r2:runner)
+WHERE h.times>3
+RETURN DISTINCT [r1.runner_id, r2.runner_id] as parejas, h.times
+ORDER BY h.times DESC
+
+
